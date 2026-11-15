@@ -122,12 +122,17 @@ async function handleRegister(){
   if(!Nombre || !Correo || !ContrasenaHash) return alert('Completa los campos obligatorios.');
 
   try {
-    const created = await api('/Usuarios', {
+    // 1. Insertar usuario sin exigir representación de vuelta
+    const res = await api('/Usuarios', {
       method: 'POST',
-      headers: { 'Prefer': 'return=representation' },
       body: JSON.stringify({ Nombre, Correo, Telefono, ContrasenaHash, Rol: 'Cliente', Activo: true })
     });
-    const u = created[0];
+
+    // 2. Consultar el usuario recién creado para obtener su ID asignado
+    const users = await api(`/Usuarios?Correo=eq.${encodeURIComponent(Correo)}`);
+    if (!users || users.length === 0) throw Error('No se pudo verificar el usuario creado.');
+    
+    const u = users[0];
     state.user = { usuarioId: u.UsuarioId, nombre: u.Nombre, correo: u.Correo, telefono: u.Telefono, rol: u.Rol };
     await loadOrders();
     go('inicio');
