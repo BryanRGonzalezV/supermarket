@@ -11,11 +11,10 @@
 </style></head>
 <body><div class="app">
 <aside class="sidebar"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><p class="side-title">MI SUPERMERCADO</p><nav class="nav" id="nav"></nav><div class="side-foot">SuperMarket · Santo Domingo<br>Recogida en tienda<button type="button" class="logout" onclick="logout()">↪ Cerrar sesión</button></div></aside>
-<div class="shell"><header class="top"><div class="brand" style="margin:0"><span class="logo">🛒</span><span class="mobile-only">SuperMarket</span></div><input class="top-search" id="globalSearch" placeholder="⌕  Buscar productos..."><div>🛒 <b id="cartCount" style="color:#e50914">0</b></div><div class="user"><span>Ana García · Cliente</span><div class="avatar">AG</div></div></header><main class="content" id="view"></main></div><nav class="mobilebar" id="mobileNav"></nav></div>
+<div class="shell"><header class="top"><div class="brand" style="margin:0"><span class="logo">🛒</span><span class="mobile-only">SuperMarket</span></div><input class="top-search" id="globalSearch" placeholder="⌕  Buscar productos..."><div>🛒 <b id="cartCount" style="color:#e50914">0</b></div><div class="user" id="topUser"><span>Invitado</span><div class="avatar">IN</div></div></header><main class="content" id="view"></main></div><nav class="mobilebar" id="mobileNav"></nav></div>
 <script>
 'use strict';
 
-/* Configuración de Supabase */
 const SUPABASE_URL = 'https://essblvvwhcghtdmxjbrdy.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_d1bbelnzjGCrwWkzkBXpxw_MyDKFPq1';
 
@@ -27,22 +26,30 @@ const demo=[
  {articuloId:5,categoriaId:3,categoria:'Carnes y pescados',nombre:'Pollo entero (kg)',descripcion:'Pollo fresco por kilogramo.',precio:150,stock:9,activo:true,img:'https://images.unsplash.com/photo-1604503468506-a8da13d82791?auto=format&fit=crop&w=600&q=80'},
  {articuloId:6,categoriaId:4,categoria:'Despensa',nombre:'Arroz 1 kg',descripcion:'Arroz selecto de grano largo.',precio:90,stock:25,activo:true,img:'imagenes/arroz.jpg'},
  {articuloId:7,categoriaId:4,categoria:'Despensa',nombre:'Pasta 500 g',descripcion:'Pasta de trigo.',precio:65,stock:0,activo:true,img:'imagenes/pasta.jpg'},
- {articuloId:8,categoriaId:5,categoria:'Bebidas',nombre:'Agua 500 ml',descripcion:'Agua purificada.',precio:25,stock:35,activo:true,img:'imagenes/agua.jpg'}];
+ {articuloId:8,categoriaId:5,categoria:'Bebidas',nombre:'Agua 500 ml',descripcion:'Agua purificada.',precio:25,stock:35,activo:true,img:'imagenes/agua.jpg'}
+];
 
-const state={page:'login',selectedProduct:null,products:demo,cart:new Map(),filters:{q:'',cat:'',stock:'',order:'az'},user:{usuarioId:1,nombre:'Ana García',correo:'ana.garcia@correo.com',telefono:'809 555 0142',rol:'Cliente'},orders:[{pedidoId:125,fechaPedido:'2026-10-28',fechaRecogidaProgramada:'2026-10-29T16:00',estado:'Listo para recoger',total:305,codigoRecogida:'SM-8125'}]};
+const state={
+  page:'login',
+  selectedProduct:null,
+  selectedOrder:null,
+  products:demo,
+  cart:new Map(),
+  filters:{q:'',cat:'',stock:'',order:'az'},
+  user:{usuarioId:1,nombre:'Ana García',correo:'ana.garcia@correo.com',telefono:'809 555 0142',rol:'Cliente'},
+  orders:[]
+};
 
 const money=n=>new Intl.NumberFormat('es-DO',{style:'currency',currency:'DOP'}).format(n);
 
 async function api(path, options = {}) {
   let url = SUPABASE_URL + '/rest/v1' + path;
-  
   const headers = {
     'Content-Type': 'application/json',
     'apikey': SUPABASE_PUBLISHABLE_KEY,
     'Authorization': 'Bearer ' + SUPABASE_PUBLISHABLE_KEY,
     ...(options.headers || {})
   };
-
   const r = await fetch(url, { headers, ...options });
   if (!r.ok) throw Error(await r.text() || 'Error de conexión');
   return r.status === 204 ? null : r.json();
@@ -50,23 +57,105 @@ async function api(path, options = {}) {
 
 async function loadProducts(){
   try{
-    const data = await api('/articulos?activo=eq.true');
+    const data = await api('/Articulos?activo=eq.true&order=ArticuloId.asc');
     state.products = data.map(p => ({
       ...p,
-      articuloId: p.articulo_id,
-      categoriaId: p.categoria_id,
-      imagenUrl: p.imagen_url,
-      img: p.imagen_url || `imagenes/articulo-${p.articulo_id}.jpg`
+      articuloId: p.ArticuloId,
+      categoriaId: p.CategoriaId,
+      nombre: p.Nombre,
+      descripcion: p.Descripcion,
+      precio: p.Precio,
+      stock: p.Stock,
+      activo: p.Activo,
+      imagenUrl: p.ImagenUrl,
+      img: p.ImagenUrl || `imagenes/articulo-${p.ArticuloId}.jpg`
     }));
-  }catch(e){
-    console.info('API no disponible; se mantiene la vista demostrativa.', e.message);
-  }
+  }catch(e){console.info('Usando catálogo demostrativo:',e.message)}
   render();
 }
 
-const routes=[['inicio','⌂ Inicio'],['articulos','▦ Artículos'],['carrito','🛒 Mi carrito'],['pedidos','◇ Mis pedidos'],['perfil','♙ Perfil'],['admin','⚙ Administración']];
-function nav(){const make=(mobile=false)=>routes.filter(x=>!mobile||x[0]!=='perfil').map(([p,t])=>`<button class="${state.page===p?'active':''}" onclick="go('${p}')">${t}</button>`).join('');document.querySelector('#nav').innerHTML=make();document.querySelector('#mobileNav').innerHTML=make(true)}
-function go(p){state.page=p;render();scrollTo(0,0)}
+async function loadOrders(){
+  try{
+    const query = (state.user.rol === 'Administrador' || state.user.rol === 'Empleado')
+      ? '/Pedidos?select=*,Usuarios!Pedidos_ClienteId_fkey(Nombre,Telefono)&order=PedidoId.desc'
+      : `/Pedidos?ClienteId=eq.${state.user.usuarioId}&order=PedidoId.desc`;
+    const data = await api(query);
+    state.orders = data.map(o => ({
+      pedidoId: o.PedidoId,
+      clienteNombre: o.Usuarios ? o.Usuarios.Nombre : state.user.nombre,
+      fechaPedido: o.FechaPedido,
+      fechaRecogidaProgramada: o.FechaRecogidaProgramada,
+      estado: o.Estado,
+      total: o.Total,
+      codigoRecogida: o.CodigoRecogida
+    }));
+  }catch(e){console.info('Cargando pedidos locales:',e.message)}
+  render();
+}
+
+async function handleLogin(){
+  const correo = document.querySelector('#loginEmail').value.trim();
+  const pass = document.querySelector('#loginPass').value;
+  try {
+    const users = await api(`/Usuarios?Correo=eq.${encodeURIComponent(correo)}`);
+    if (!users || users.length === 0) return alert('Correo no registrado.');
+    const u = users[0];
+    state.user = {
+      usuarioId: u.UsuarioId,
+      nombre: u.Nombre,
+      correo: u.Correo,
+      telefono: u.Telefono || '',
+      rol: u.Rol
+    };
+    await loadOrders();
+    go(u.Rol === 'Administrador' || u.Rol === 'Empleado' ? 'admin' : 'inicio');
+  } catch (e) {
+    alert('Error al iniciar sesión: ' + e.message);
+  }
+}
+
+async function handleRegister(){
+  const Nombre = document.querySelector('#regName').value.trim();
+  const Correo = document.querySelector('#regEmail').value.trim();
+  const Telefono = document.querySelector('#regPhone').value.trim();
+  const ContrasenaHash = document.querySelector('#regPass').value;
+  if(!Nombre || !Correo || !ContrasenaHash) return alert('Completa los campos obligatorios.');
+
+  try {
+    const created = await api('/Usuarios', {
+      method: 'POST',
+      headers: { 'Prefer': 'return=representation' },
+      body: JSON.stringify({ Nombre, Correo, Telefono, ContrasenaHash, Rol: 'Cliente', Activo: true })
+    });
+    const u = created[0];
+    state.user = { usuarioId: u.UsuarioId, nombre: u.Nombre, correo: u.Correo, telefono: u.Telefono, rol: u.Rol };
+    await loadOrders();
+    go('inicio');
+  } catch (e) {
+    alert('Error al registrar cuenta: ' + e.message);
+  }
+}
+
+function nav(){
+  const baseRoutes = [['inicio','⌂ Inicio'],['articulos','▦ Artículos'],['carrito','🛒 Mi carrito'],['pedidos','◇ Mis pedidos'],['perfil','♙ Perfil']];
+  if (state.user.rol === 'Administrador' || state.user.rol === 'Empleado') baseRoutes.push(['admin','⚙ Gestión Tienda']);
+
+  const make=(mobile=false)=>baseRoutes.filter(x=>!mobile||x[0]!=='perfil').map(([p,t])=>`<button class="${state.page===p?'active':''}" onclick="go('${p}')">${t}</button>`).join('');
+  document.querySelector('#nav').innerHTML=make();
+  document.querySelector('#mobileNav').innerHTML=make(true);
+
+  const initials = state.user.nombre.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  document.querySelector('.user').innerHTML = `<span>${state.user.nombre} · <b>${state.user.rol}</b></span><div class="avatar">${initials}</div>`;
+}
+
+function go(p){
+  if (p === 'admin' && state.user.rol !== 'Administrador' && state.user.rol !== 'Empleado') return go('inicio');
+  state.page=p;
+  if (p === 'pedidos' || p === 'admin') loadOrders();
+  render();
+  scrollTo(0,0);
+}
+
 function logout(){
  state.cart.clear();
  state.filters={q:'',cat:'',stock:'',order:'az'};
@@ -76,29 +165,164 @@ function logout(){
  if(search) search.value='';
  go('login');
 }
-function openCategory(category){
- state.filters={q:'',cat:category,stock:'',order:'az'};
- go('articulos');
-}
+
+function openCategory(category){state.filters={q:'',cat:category,stock:'',order:'az'};go('articulos')}
 function add(id){const p=state.products.find(x=>x.articuloId===id),n=(state.cart.get(id)||0)+1;if(n<=p.stock)state.cart.set(id,n);render()}
 function qty(id,d){const n=(state.cart.get(id)||0)+d;if(n<=0)state.cart.delete(id);else{const p=state.products.find(x=>x.articuloId===id);state.cart.set(id,Math.min(n,p.stock))}render()}
-function productCard(p){return `<article class="card"><div class="product-img img-fallback" role="button" aria-label="Ver ${p.nombre}" onclick="openProduct(${p.articuloId})" style="background-image:url('${p.imagenUrl||p.img||'imagenes/producto-sin-imagen.svg'}')"></div><div class="card-body"><div class="muted small">${p.categoria}</div><b role="button" onclick="openProduct(${p.articuloId})">${p.nombre}</b><div class="row between"><span class="price">${money(p.precio)}</span><span class="${p.stock?'stock':'stock out'}">${p.stock?'Disponible':'Agotado'}</span></div><div class="row"><span class="qty">− 1 +</span><button class="btn primary" ${!p.stock?'disabled':''} onclick="add(${p.articuloId})">${p.stock?'Agregar':'Agotado'}</button></div></div></article>`}
-function login(){return `<div class="auth-page"><section class="auth-hero"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Tu supermercado, más cerca de ti</h1><p>Todo lo que necesitas para tu día a día. Elige tus productos y recógelos en nuestra tienda.</p><p><b>✓ Calidad siempre</b> &nbsp; <b>✓ Recogida fácil</b></p></section><section class="auth-card"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Iniciar sesión</h1><p class="muted">Ingresa tus credenciales para continuar</p><label>Correo electrónico *</label><input id="loginEmail" class="field" type="email" value="ana.garcia@correo.com"><label>Contraseña *</label><input id="loginPass" class="field" type="password" value="12345678"><div class="auth-links"><label><input type="checkbox"> Recordarme</label><a href="#">Recuperar contraseña</a></div><button class="btn primary" style="width:100%" onclick="go('inicio')">Iniciar sesión</button><p style="text-align:center">¿No tienes cuenta? <button class="back" onclick="go('registro')">Regístrate</button></p></section></div>`}
-function register(){return `<div class="auth-page"><section class="auth-hero"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Tu supermercado, más cerca de ti</h1><p>Crea tu cuenta y prepara tu pedido para recogida.</p></section><section class="auth-card"><button class="back" onclick="go('login')">← Volver</button><h1>Crear cuenta</h1><p class="muted">Completa tus datos para comenzar a comprar.</p><label>Nombre completo *</label><input class="field" value="Ana García"><label>Correo electrónico *</label><input class="field" type="email" value="ana.garcia@correo.com"><label>Teléfono *</label><input class="field" value="809 555 0142"><label>Dirección</label><input class="field" value="Av. Independencia 125, Santo Domingo"><div class="form-grid"><div><label>Contraseña *</label><input class="field" type="password"></div><div><label>Confirmar contraseña *</label><input class="field" type="password"></div></div><label><input type="checkbox"> Acepto los términos y condiciones</label><button class="btn primary" style="width:100%;margin-top:15px" onclick="go('inicio')">Crear cuenta</button></section></div>`}
+function productCard(p){return `<article class="card"><div class="product-img img-fallback" role="button" aria-label="Ver ${p.nombre}" onclick="openProduct(${p.articuloId})" style="background-image:url('${p.imagenUrl||p.img||'imagenes/producto-sin-imagen.svg'}')"></div><div class="card-body"><div class="muted small">${p.categoria}</div><b role="button" onclick="openProduct(${p.articuloId})">${p.nombre}</b><div class="row between"><span class="price">${money(p.precio)}</span><span class="${p.stock?'stock':'stock out'}">${p.stock?'Disponible ('+p.stock+')':'Agotado'}</span></div><div class="row"><button class="btn primary" ${!p.stock?'disabled':''} onclick="add(${p.articuloId})">${p.stock?'Agregar':'Agotado'}</button></div></div></article>`}
+
+function login(){return `<div class="auth-page"><section class="auth-hero"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Tu supermercado, más cerca de ti</h1><p>Todo lo que necesitas para tu día a día. Elige tus productos y recógelos en nuestra tienda.</p><p><b>✓ Recogida presencial sin filas</b></p></section><section class="auth-card"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Iniciar sesión</h1><p class="muted">Ingresa tus credenciales para continuar</p><label>Correo electrónico *</label><input id="loginEmail" class="field" type="email" value="ana.garcia@correo.com"><label>Contraseña *</label><input id="loginPass" class="field" type="password" value="12345678"><button class="btn primary" style="width:100%;margin-top:10px" onclick="handleLogin()">Iniciar sesión</button><p style="text-align:center">¿No tienes cuenta? <button class="back" onclick="go('registro')">Regístrate</button></p></section></div>`}
+
+function register(){return `<div class="auth-page"><section class="auth-hero"><div class="brand"><span class="logo">🛒</span>SuperMarket</div><h1>Tu supermercado, más cerca de ti</h1><p>Crea tu cuenta y prepara tu pedido para recogida en tienda.</p></section><section class="auth-card"><button class="back" onclick="go('login')">← Volver</button><h1>Crear cuenta</h1><p class="muted">Completa tus datos para comenzar a comprar.</p><label>Nombre completo *</label><input id="regName" class="field" placeholder="Ej. Juan Pérez"><label>Correo electrónico *</label><input id="regEmail" class="field" type="email" placeholder="juan@correo.com"><label>Teléfono *</label><input id="regPhone" class="field" placeholder="809 555 0000"><label>Contraseña *</label><input id="regPass" class="field" type="password"><button class="btn primary" style="width:100%;margin-top:15px" onclick="handleRegister()">Crear cuenta</button></section></div>`}
+
 function openProduct(id){state.selectedProduct=id;go('producto')}
-function productDetail(){const p=state.products.find(x=>x.articuloId===state.selectedProduct)||state.products[0];return `<button class="back" onclick="go('articulos')">← Volver al catálogo</button><div class="detail-layout"><div class="detail-image img-fallback" style="background-image:url('${p.imagenUrl||p.img||'imagenes/producto-sin-imagen.svg'}')"></div><section class="panel detail-info"><div class="muted">Inicio › Artículos › ${p.categoria}</div><h1 class="title" style="margin-top:18px">${p.nombre}</h1><div class="price">${money(p.precio)}</div><span class="${p.stock?'stock':'stock out'}">${p.stock?'Disponible':'Agotado'}</span><p style="line-height:1.7">${p.descripcion||'Producto disponible para recogida en SuperMarket · Santo Domingo.'}</p><h3>Cantidad</h3><div class="row"><button class="btn secondary">−</button><b>1</b><button class="btn secondary">+</button></div><button class="btn primary" style="width:100%;margin-top:22px" ${!p.stock?'disabled':''} onclick="add(${p.articuloId});go('carrito')">Agregar al carrito</button><p class="muted">Recoge en SuperMarket · Santo Domingo</p></section></div><div class="section-head"><h2>También te puede interesar</h2></div><div class="products">${state.products.filter(x=>x.articuloId!==p.articuloId).slice(0,4).map(productCard).join('')}</div>`}
-function admin(){return `<h1 class="title">Administración</h1><p class="muted">Resumen operativo de SuperMarket</p><div class="admin-grid"><div class="panel kpi">Artículos activos<strong>${state.products.filter(p=>p.activo!==false).length}</strong></div><div class="panel kpi">Pedidos<strong>${state.orders.length}</strong></div><div class="panel kpi">Stock bajo<strong>${state.products.filter(p=>p.stock<10).length}</strong></div><div class="panel kpi">Ventas mostradas<strong>${money(state.orders.reduce((a,o)=>a+o.total,0))}</strong></div></div><div class="section-head"><h2>Gestión de artículos</h2><button class="btn primary">+ Nuevo artículo</button></div><section class="panel" style="padding:14px;overflow:auto"><table class="orders"><thead><tr><th>Artículo</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Estado</th></tr></thead><tbody>${state.products.map(p=>`<tr><td>${p.nombre}</td><td>${p.categoria}</td><td>${money(p.precio)}</td><td>${p.stock}</td><td><span class="badge ${p.stock?'ok':''}">${p.stock?'Activo':'Agotado'}</span></td></tr>`).join('')}</tbody></table></section>`}
-function home(){return `<h1 class="title">Hola, Ana</h1><div class="muted">Tu compra de siempre, a tu ritmo.</div><section class="hero"><div><b>FRESCURA QUE SE NOTA</b><h2>Productos frescos, calidad siempre</h2><p>Haz tu pedido y recógelo cuando esté listo</p><button class="btn primary" onclick="go('articulos')">→ Ver artículos</button></div></section><div class="section-head"><h2>Compra por categoría</h2></div><div class="categories">${['🍎|Frutas y verduras','🥛|Lácteos y huevos','🐟|Carnes y pescados','🌾|Despensa','🥤|Bebidas','🧴|Limpieza'].map(x=>{let [i,n]=x.split('|');return `<button type="button" class="cat" onclick="openCategory(\'${n}\')"><span style="font-size:25px">${i}</span><b>${n}</b></button>`}).join('')}</div><div class="section-head"><h2>Productos destacados</h2><button class="btn secondary" onclick="go('articulos')">Ver todos</button></div><div class="products">${state.products.slice(0,4).map(productCard).join('')}</div>`}
+function productDetail(){const p=state.products.find(x=>x.articuloId===state.selectedProduct)||state.products[0];return `<button class="back" onclick="go('articulos')">← Volver al catálogo</button><div class="detail-layout"><div class="detail-image img-fallback" style="background-image:url('${p.imagenUrl||p.img||'imagenes/producto-sin-imagen.svg'}')"></div><section class="panel detail-info"><div class="muted">Inicio › Artículos › ${p.categoria}</div><h1 class="title" style="margin-top:18px">${p.nombre}</h1><div class="price">${money(p.precio)}</div><span class="${p.stock?'stock':'stock out'}">${p.stock?'Disponible ('+p.stock+' uds)':'Agotado'}</span><p style="line-height:1.7">${p.descripcion||'Producto disponible para recogida en SuperMarket · Santo Domingo.'}</p><button class="btn primary" style="width:100%;margin-top:22px" ${!p.stock?'disabled':''} onclick="add(${p.articuloId});go('carrito')">Agregar al carrito</button><p class="muted">Recogida presencial en tienda</p></section></div>`}
+
+async function updateOrderStatus(PedidoId, NuevoEstado){
+  try {
+    await api(`/Pedidos?PedidoId=eq.${PedidoId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ Estado: NuevoEstado, EmpleadoId: state.user.usuarioId })
+    });
+    // Registrar en HistorialEstadosPedido
+    await api('/HistorialEstadosPedido', {
+      method: 'POST',
+      body: JSON.stringify({ PedidoId, Estado: NuevoEstado, UsuarioId: state.user.usuarioId })
+    });
+    await loadOrders();
+  } catch (e) {
+    alert('Error al actualizar estado: ' + e.message);
+  }
+}
+
+function admin(){
+  const estados = ['Solicitado','En preparación','Listo para recoger','Recogido','Cancelado'];
+  return `<h1 class="title">Gestión de Tienda</h1><p class="muted">Control operativo de pedidos y stock para recogida en tienda</p>
+  <div class="admin-grid">
+    <div class="panel kpi">Artículos activos<strong>${state.products.filter(p=>p.activo!==false).length}</strong></div>
+    <div class="panel kpi">Pedidos totales<strong>${state.orders.length}</strong></div>
+    <div class="panel kpi">Stock bajo<strong>${state.products.filter(p=>p.stock<10).length}</strong></div>
+    <div class="panel kpi">Ventas registradas<strong>${money(state.orders.reduce((a,o)=>a+Number(o.total),0))}</strong></div>
+  </div>
+
+  <div class="section-head"><h2>Control de Pedidos (Pickup)</h2></div>
+  <section class="panel" style="padding:14px;overflow:auto;margin-bottom:24px">
+    <table class="orders">
+      <thead><tr><th>Pedido</th><th>Cliente</th><th>Código</th><th>Total</th><th>Estado Actual</th><th>Cambiar Estado</th></tr></thead>
+      <tbody>
+        ${state.orders.length ? state.orders.map(o=>`
+          <tr>
+            <td><b>PED-${String(o.pedidoId).padStart(6,'0')}</b></td>
+            <td>${o.clienteNombre}</td>
+            <td><code>${o.codigoRecogida}</code></td>
+            <td>${money(o.total)}</td>
+            <td><span class="badge ${o.estado==='Listo para recoger'||o.estado==='Recogido'?'ok':''}">${o.estado}</span></td>
+            <td>
+              <select class="field" style="padding:6px" onchange="updateOrderStatus(${o.pedidoId}, this.value)">
+                ${estados.map(est=>`<option value="${est}" ${o.estado===est?'selected':''}>${est}</option>`).join('')}
+              </select>
+            </td>
+          </tr>
+        `).join('') : '<tr><td colspan="6" class="muted">No hay pedidos registrados.</td></tr>'}
+      </tbody>
+    </table>
+  </section>`;
+}
+
+function home(){return `<h1 class="title">Hola, ${state.user.nombre.split(' ')[0]}</h1><div class="muted">Compra online y retira directamente en nuestra sucursal.</div><section class="hero"><div><b>RECOGIDA EN TIENDA</b><h2>Sin filas, listo cuando llegues</h2><p>Prepara tu pedido desde casa y pasa a retirarlo</p><button class="btn primary" onclick="go('articulos')">→ Ver artículos</button></div></section><div class="section-head"><h2>Compra por categoría</h2></div><div class="categories">${['🍎|Frutas y verduras','🥛|Lácteos y huevos','🐟|Carnes y pescados','🌾|Despensa','🥤|Bebidas','🧴|Limpieza'].map(x=>{let [i,n]=x.split('|');return `<button type="button" class="cat" onclick="openCategory('${n}')"><span style="font-size:25px">${i}</span><b>${n}</b></button>`}).join('')}</div><div class="section-head"><h2>Productos destacados</h2><button class="btn secondary" onclick="go('articulos')">Ver todos</button></div><div class="products">${state.products.slice(0,4).map(productCard).join('')}</div>`}
+
 function filtered(){let a=state.products.filter(p=>p.activo!==false&&p.nombre.toLowerCase().includes(state.filters.q.toLowerCase())&&(!state.filters.cat||p.categoria===state.filters.cat)&&(!state.filters.stock||(state.filters.stock==='si'?p.stock>0:p.stock===0)));a.sort((x,y)=>state.filters.order==='price'?x.precio-y.precio:x.nombre.localeCompare(y.nombre));return a}
-function articles(){const a=filtered(),cats=[...new Set(state.products.map(p=>p.categoria))];return `<h1 class="title">Artículos</h1><div class="muted">Encuentra todo lo que necesitas</div><div class="filters panel"><input class="field" placeholder="⌕ Buscar por nombre" value="${state.filters.q}" oninput="state.filters.q=this.value;render()"><select class="field" onchange="state.filters.cat=this.value;render()"><option value="">Todas las categorías</option>${cats.map(c=>`<option ${state.filters.cat===c?'selected':''}>${c}</option>`).join('')}</select><select class="field" onchange="state.filters.stock=this.value;render()"><option value="">Disponibilidad: todos</option><option value="si">Disponibles</option><option value="no">Agotados</option></select><select class="field" onchange="state.filters.order=this.value;render()"><option value="az">Orden: nombre A–Z</option><option value="price">Precio menor</option></select></div><div class="row between muted"><span>${a.length} artículos · Precios en RD$</span><span>SuperMarket · Santo Domingo</span></div>${a.length?`<div class="products" style="margin-top:15px">${a.map(productCard).join('')}</div>`:`<div class="panel empty"><h2>No encontramos artículos con esos filtros</h2><p class="muted">Prueba con otro nombre o cambia la categoría y disponibilidad.</p><button class="btn primary" onclick="state.filters={q:'',cat:'',stock:'',order:'az'};render()">Limpiar filtros</button></div>`}`}
-function totals(){let u=0,t=0;for(const[id,n]of state.cart){const p=state.products.find(x=>x.articuloId===id);u+=n;t+=n*p.precio}return{u,t}}
-function cart(){const {u,t}=totals(),items=[...state.cart].map(([id,n])=>{const p=state.products.find(x=>x.articuloId===id);return `<div class="cart-item"><div class="row"><div class="thumb" style="background-image:url('${p.img}')"></div><b>${p.nombre}</b></div><span class="unit">${money(p.precio)}</span><span><button onclick="qty(${id},-1)">−</button> ${n} <button onclick="qty(${id},1)">+</button></span><b>${money(n*p.precio)}</b><button onclick="state.cart.delete(${id});render()">🗑</button></div>`}).join('');if(!u)return `<h1 class="title">Mi carrito</h1><p class="muted">Tu próxima compra empieza aquí.</p><div class="panel empty"><h2>Tu carrito está vacío</h2><p class="muted">Agrega tus productos favoritos y recógelos en nuestra tienda.</p><button class="btn primary" onclick="go('articulos')">Explorar artículos</button></div>`;return `<h1 class="title">Mi carrito</h1><p class="muted">${state.cart.size} productos · ${u} unidades para tu recogida</p><div class="cart-layout"><section class="panel cart-table">${items}</section><aside class="panel summary"><h2>Resumen de compra</h2><div class="summary-line"><span>Subtotal · ${u} unidades</span><span>${money(t)}</span></div><div class="summary-line"><span>Envío / cargos</span><span>${money(0)}</span></div><div class="summary-line total"><span>Total</span><span>${money(t)}</span></div><button class="btn primary" onclick="go('confirmar')">Continuar con el pedido</button><p class="muted small">${state.cart.size} productos · Recogida en tienda · Sin envío</p></aside></div>`}
-function checkout(){const {u,t}=totals();return `<h1 class="title">Confirma tu recogida</h1><p class="muted">Revisa tu compra antes de registrar el pedido.</p><div class="checkout"><div><section class="panel" style="padding:20px"><h2>Información de recogida</h2><div class="form-grid"><div class="full"><label>Nombre</label><input class="field" value="${state.user.nombre}"></div><div class="full"><label>Teléfono</label><input class="field" value="${state.user.telefono}"></div><div class="full"><label>Punto de recogida</label><input class="field" value="SuperMarket · Santo Domingo" readonly></div><div><label>Fecha</label><input class="field" type="date" id="pickupDate"></div><div><label>Franja horaria</label><select class="field" id="pickupTime"><option>16:00–17:00</option><option>17:00–18:00</option><option>18:00–19:00</option></select></div></div><p class="muted">Código de recogida<br><b style="color:#151515">Se generará al confirmar</b></p></section><section class="panel" style="padding:20px;margin-top:16px"><h2>Método de pago</h2><label><input type="radio" name="pay" value="Efectivo en Tienda" checked> Pagar al recoger</label><label><input type="radio" name="pay" value="Tarjeta de Credito"> Pagar en línea</label></section></div><aside class="panel summary"><h2>Resumen del pedido</h2><div class="summary-line"><span>Subtotal · ${u} unidades</span><span>${money(t)}</span></div><div class="summary-line"><span>Envío / cargos</span><span>${money(0)}</span></div><div class="summary-line total"><span>Total</span><span>${money(t)}</span></div><label><input type="checkbox" id="confirmData"> Confirmo que los datos son correctos</label><button class="btn primary" onclick="createOrder()">Confirmar pedido</button><button class="btn secondary" style="width:100%;margin-top:10px" onclick="go('carrito')">Volver al carrito</button></aside></div>`}
-async function createOrder(){if(!document.querySelector('#confirmData').checked)return alert('Confirma que los datos son correctos.');const items=[...state.cart].map(([articuloId,cantidad])=>({articuloId,cantidad}));const payload={clienteId:state.user.usuarioId,fechaRecogidaProgramada:document.querySelector('#pickupDate').value+'T16:00:00',metodoPago:document.querySelector('input[name=pay]:checked').value,items};try{const o=await api('/pedidos',{method:'POST',body:JSON.stringify(payload)});state.orders.unshift(o)}catch(e){const {t}=totals();state.orders.unshift({pedidoId:126,fechaPedido:new Date().toISOString(),fechaRecogidaProgramada:'2026-10-29T16:00',estado:'Solicitado',total:t,codigoRecogida:'SM-8126'})}state.lastOrder=state.orders[0];state.cart.clear();go('confirmacion')}
-function confirmation(){const o=state.lastOrder||state.orders[0];return `<section class="panel confirmation"><div style="font-size:55px">✓</div><h1>¡Tu pedido ha sido registrado!</h1><p class="muted">Gracias, ${state.user.nombre}. Esta es la confirmación de tu pedido.</p><h2>PED-${String(o.pedidoId).padStart(6,'0')}</h2><span class="badge">${o.estado}</span><div class="pickup-code">${o.codigoRecogida}</div><p>Presenta este código al retirar tu pedido.</p><div class="summary-line total"><span>Total</span><span>${money(o.total)}</span></div><button class="btn primary" onclick="go('pedidos')">Ver seguimiento</button> <button class="btn secondary" onclick="go('inicio')">Volver al inicio</button></section>`}
-function orders(){return `<h1 class="title">Mis pedidos</h1><p class="muted">Consulta el estado de tu compra y la recogida.</p><section class="panel" style="padding:14px"><table class="orders"><thead><tr><th>Pedido</th><th>Solicitud</th><th>Recogida</th><th>Total</th><th>Estado</th></tr></thead><tbody>${state.orders.map(o=>`<tr><td><b>PED-${String(o.pedidoId).padStart(6,'0')}</b></td><td>${new Date(o.fechaPedido).toLocaleDateString('es-DO')}</td><td>${new Date(o.fechaRecogidaProgramada).toLocaleString('es-DO')}</td><td>${money(o.total)}</td><td><span class="badge ${o.estado.includes('Listo')?'ok':''}">${o.estado}</span></td></tr>`).join('')}</tbody></table></section>${state.orders[0]?orderDetail(state.orders[0]):''}`}
-function orderDetail(o){const idx=['Solicitado','En preparación','Listo para recoger','Recogido'].indexOf(o.estado);return `<section class="panel" style="padding:20px;margin-top:20px"><div class="row between"><h2>Detalle · PED-${String(o.pedidoId).padStart(6,'0')}</h2><span class="badge ${idx>1?'ok':''}">${o.estado}</span></div><div class="progress">${['Solicitado','En preparación','Listo para recoger','Recogido'].map((s,i)=>`<div class="step ${i<=idx?'done':''}">${i+1}. ${s}</div>`).join('')}</div><div class="notice success"><b>${o.estado==='Listo para recoger'?'Tu pedido está listo para recoger. Presenta tu código al empleado.':'Seguimiento del pedido actualizado.'}</b></div><p>Recogida · SuperMarket · Santo Domingo</p><h3>Código: ${o.codigoRecogida}</h3><div class="total row between"><span>Total</span><span>${money(o.total)}</span></div></section>`}
-function profile(){return `<h1 class="title">Mi perfil</h1><p class="muted">Mantén tus datos de contacto actualizados.</p><div class="notice success"><b>Cambios guardados</b><br><span class="muted">La API actualizará la tabla Usuarios.</span></div><div class="profile"><section class="panel"><h2>Información personal</h2><div class="row"><div class="avatar">AG</div><div><b>Ana García</b><div class="muted">Cliente</div></div></div><p><label>Nombre completo</label><input class="field" value="${state.user.nombre}"></p><p><label>Correo electrónico</label><input class="field" value="${state.user.correo}"></p><p><label>Teléfono</label><input class="field" value="${state.user.telefono}"></p><button class="btn primary">Guardar cambios</button></section><section class="panel"><h2>Cambiar contraseña</h2><p class="muted">Usa una contraseña de al menos 8 caracteres.</p><p><label>Contraseña actual</label><input class="field" type="password"></p><p><label>Nueva contraseña</label><input class="field" type="password"></p><p><label>Confirmar nueva contraseña</label><input class="field" type="password"></p><button class="btn secondary">Actualizar contraseña</button></section></div>`}
+
+function articles(){const a=filtered(),cats=[...new Set(state.products.map(p=>p.categoria))];return `<h1 class="title">Artículos</h1><div class="muted">Catálogo disponible para recogida en tienda</div><div class="filters panel"><input class="field" placeholder="⌕ Buscar por nombre" value="${state.filters.q}" oninput="state.filters.q=this.value;render()"><select class="field" onchange="state.filters.cat=this.value;render()"><option value="">Todas las categorías</option>${cats.map(c=>`<option ${state.filters.cat===c?'selected':''}>${c}</option>`).join('')}</select><select class="field" onchange="state.filters.stock=this.value;render()"><option value="">Disponibilidad: todos</option><option value="si">Disponibles</option><option value="no">Agotados</option></select><select class="field" onchange="state.filters.order=this.value;render()"><option value="az">Orden: nombre A–Z</option><option value="price">Precio menor</option></select></div><div class="row between muted"><span>${a.length} artículos · Precios en RD$</span><span>SuperMarket · Santo Domingo</span></div>${a.length?`<div class="products" style="margin-top:15px">${a.map(productCard).join('')}</div>`:`<div class="panel empty"><h2>No encontramos artículos</h2><button class="btn primary" onclick="state.filters={q:'',cat:'',stock:'',order:'az'};render()">Limpiar filtros</button></div>`}`}
+
+function totals(){let u=0,t=0;for(const[id,n]of state.cart){const p=state.products.find(x=>x.articuloId===id);if(p){u+=n;t+=n*p.precio}}return{u,t}}
+
+function cart(){const {u,t}=totals(),items=[...state.cart].map(([id,n])=>{const p=state.products.find(x=>x.articuloId===id);return `<div class="cart-item"><div class="row"><div class="thumb" style="background-image:url('${p.img}')"></div><b>${p.nombre}</b></div><span class="unit">${money(p.precio)}</span><span><button onclick="qty(${id},-1)">−</button> ${n} <button onclick="qty(${id},1)">+</button></span><b>${money(n*p.precio)}</b><button onclick="state.cart.delete(${id});render()">🗑</button></div>`}).join('');if(!u)return `<h1 class="title">Mi carrito</h1><p class="muted">Tu próxima compra de recogida empieza aquí.</p><div class="panel empty"><h2>Tu carrito está vacío</h2><p class="muted">Agrega tus productos favoritos.</p><button class="btn primary" onclick="go('articulos')">Explorar artículos</button></div>`;return `<h1 class="title">Mi carrito</h1><p class="muted">${state.cart.size} productos · ${u} unidades para recogida</p><div class="cart-layout"><section class="panel cart-table">${items}</section><aside class="panel summary"><h2>Resumen de compra</h2><div class="summary-line"><span>Subtotal · ${u} unidades</span><span>${money(t)}</span></div><div class="summary-line total"><span>Total</span><span>${money(t)}</span></div><button class="btn primary" onclick="go('confirmar')">Proceder a recogida</button></aside></div>`}
+
+function checkout(){const {u,t}=totals();return `<h1 class="title">Confirmar Recogida en Tienda</h1><p class="muted">Verifica los datos y selecciona la hora de retiro.</p><div class="checkout"><div><section class="panel" style="padding:20px"><h2>Detalles de Retiro</h2><div class="form-grid"><div class="full"><label>Cliente</label><input class="field" value="${state.user.nombre}" readonly></div><div class="full"><label>Teléfono de contacto</label><input class="field" value="${state.user.telefono}"></div><div class="full"><label>Sucursal</label><input class="field" value="SuperMarket · Santo Domingo" readonly></div><div><label>Fecha de Recogida</label><input class="field" type="date" id="pickupDate"></div><div><label>Hora</label><select class="field" id="pickupTime"><option>16:00</option><option>17:00</option><option>18:00</option></select></div></div></section><section class="panel" style="padding:20px;margin-top:16px"><h2>Método de Pago</h2><label><input type="radio" name="pay" value="Efectivo en Tienda" checked> Pagar al retirar en tienda</label><label><input type="radio" name="pay" value="Tarjeta de Credito"> Tarjeta de Crédito / Débito</label></section></div><aside class="panel summary"><h2>Resumen</h2><div class="summary-line"><span>Total unidades</span><span>${u}</span></div><div class="summary-line total"><span>Total a pagar</span><span>${money(t)}</span></div><label><input type="checkbox" id="confirmData"> Confirmo la información de recogida</label><button class="btn primary" onclick="createOrder()">Generar Pedido</button><button class="btn secondary" style="width:100%;margin-top:10px" onclick="go('carrito')">Volver</button></aside></div>`}
+
+async function createOrder(){
+  if(!document.querySelector('#confirmData').checked) return alert('Confirma que los datos son correctos.');
+  const {t} = totals();
+  const fechaRec = document.querySelector('#pickupDate').value + 'T' + document.querySelector('#pickupTime').value + ':00';
+  const metodoPago = document.querySelector('input[name=pay]:checked').value;
+  const codigoRecogida = 'SM-' + Math.floor(1000 + Math.random() * 9000);
+
+  try {
+    // 1. Crear Pedido en tabla Pedidos
+    const createdOrder = await api('/Pedidos', {
+      method: 'POST',
+      headers: { 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        ClienteId: state.user.usuarioId,
+        FechaRecogidaProgramada: fechaRec,
+        Estado: 'Solicitado',
+        Total: t,
+        CodigoRecogida: codigoRecogida
+      })
+    });
+    const order = createdOrder[0];
+
+    // 2. Registrar Detalle, Historial y actualizar Stock
+    const detalles = [];
+    for (const [articuloId, cantidad] of state.cart) {
+      const prod = state.products.find(x => x.articuloId === articuloId);
+      detalles.push({
+        PedidoId: order.PedidoId,
+        ArticuloId: articuloId,
+        Cantidad: cantidad,
+        PrecioUnitario: prod.precio,
+        Subtotal: cantidad * prod.precio
+      });
+      await api(`/Articulos?ArticuloId=eq.${articuloId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ Stock: Math.max(0, prod.stock - cantidad) })
+      });
+    }
+
+    await api('/DetallePedido', { method: 'POST', body: JSON.stringify(detalles) });
+    await api('/HistorialEstadosPedido', { method: 'POST', body: JSON.stringify({ PedidoId: order.PedidoId, Estado: 'Solicitado', UsuarioId: state.user.usuarioId }) });
+    await api('/Pagos', { method: 'POST', body: JSON.stringify({ PedidoId: order.PedidoId, MetodoPago: metodoPago, Monto: t, Estado: 'Pendiente' }) });
+
+    state.lastOrder = { pedidoId: order.PedidoId, estado: order.Estado, codigoRecogida: order.CodigoRecogida, total: order.Total };
+    state.cart.clear();
+    await loadProducts();
+    await loadOrders();
+    go('confirmacion');
+  } catch (e) {
+    alert('Error al procesar el pedido: ' + e.message);
+  }
+}
+
+function confirmation(){const o=state.lastOrder||state.orders[0];return `<section class="panel confirmation"><div style="font-size:55px">✓</div><h1>¡Pedido de recogida registrado!</h1><p class="muted">Gracias, ${state.user.nombre}. Presenta tu código al retirar en sucursal.</p><h2>PED-${String(o.pedidoId).padStart(6,'0')}</h2><span class="badge">${o.estado}</span><div class="pickup-code">${o.codigoRecogida}</div><div class="summary-line total"><span>Total</span><span>${money(o.total)}</span></div><button class="btn primary" onclick="go('pedidos')">Ver seguimiento</button> <button class="btn secondary" onclick="go('inicio')">Inicio</button></section>`}
+
+function orders(){
+  const activeOrder = state.selectedOrder || state.orders[0];
+  return `<h1 class="title">Mis Pedidos (Pickup)</h1><p class="muted">Consulta el estado de tus retiros en tienda.</p>
+  <section class="panel" style="padding:14px">
+    <table class="orders">
+      <thead><tr><th>Pedido</th><th>Solicitud</th><th>Recogida</th><th>Total</th><th>Estado</th></tr></thead>
+      <tbody>
+        ${state.orders.length ? state.orders.map(o=>`
+          <tr style="cursor:pointer" onclick="state.selectedOrder=${JSON.stringify(o).replace(/"/g, '&quot;')};render()">
+            <td><b>PED-${String(o.pedidoId).padStart(6,'0')}</b></td>
+            <td>${new Date(o.fechaPedido).toLocaleDateString('es-DO')}</td>
+            <td>${new Date(o.fechaRecogidaProgramada).toLocaleString('es-DO')}</td>
+            <td>${money(o.total)}</td>
+            <td><span class="badge ${o.estado==='Listo para recoger'||o.estado==='Recogido'?'ok':''}">${o.estado}</span></td>
+          </tr>`).join('') : '<tr><td colspan="5" class="muted">No tienes pedidos de recogida.</td></tr>'}
+      </tbody>
+    </table>
+  </section>
+  ${activeOrder ? orderDetail(activeOrder) : ''}`;
+}
+
+function orderDetail(o){const idx=['Solicitado','En preparación','Listo para recoger','Recogido'].indexOf(o.estado);return `<section class="panel" style="padding:20px;margin-top:20px"><div class="row between"><h2>Detalle · PED-${String(o.pedidoId).padStart(6,'0')}</h2><span class="badge ${idx>1?'ok':''}">${o.estado}</span></div><div class="progress">${['Solicitado','En preparación','Listo para recoger','Recogido'].map((s,i)=>`<div class="step ${i<=idx?'done':''}">${i+1}. ${s}</div>`).join('')}</div><div class="notice success"><b>${o.estado==='Listo para recoger'?'¡Tu pedido está listo! Preséntate en caja con tu código.':'Estado: '+o.estado}</b></div><p>Recogida en Tienda · SuperMarket · Santo Domingo</p><h3>Código de Retiro: ${o.codigoRecogida}</h3><div class="total row between"><span>Total</span><span>${money(o.total)}</span></div></section>`}
+
+function profile(){return `<h1 class="title">Mi Perfil</h1><p class="muted">Datos de tu cuenta (${state.user.rol})</p><div class="profile"><section class="panel"><h2>Información personal</h2><p><label>Nombre</label><input class="field" value="${state.user.nombre}" readonly></p><p><label>Correo</label><input class="field" value="${state.user.correo}" readonly></p><p><label>Teléfono</label><input class="field" value="${state.user.telefono}" readonly></p><p><label>Rol</label><input class="field" value="${state.user.rol}" readonly></p></section></div>`}
+
 function render(){const auth=['login','registro'].includes(state.page);document.querySelector('.sidebar').style.display=auth?'none':'';document.querySelector('.top').style.display=auth?'none':'';document.querySelector('.mobilebar').style.display=auth?'none':'';document.querySelector('.shell').style.marginLeft=auth?'0':'';document.querySelector('.content').style.maxWidth=auth?'none':'';document.querySelector('.content').style.padding=auth?'0':'';nav();document.querySelector('#cartCount').textContent=totals().u;const views={login,registro:register,inicio:home,articulos:articles,producto:productDetail,carrito:cart,confirmar:checkout,confirmacion:confirmation,pedidos:orders,perfil:profile,admin};document.querySelector('#view').innerHTML=(views[state.page]||home)();if(state.page==='confirmar'){const d=new Date(Date.now()+86400000).toISOString().slice(0,10);document.querySelector('#pickupDate').value=d}}
-document.querySelector('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){state.filters.q=e.target.value;go('articulos')}});render();loadProducts();
+document.querySelector('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){state.filters.q=e.target.value;go('articulos')}});
+render();
+loadProducts();
 </script></body></html>
