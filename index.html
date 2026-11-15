@@ -57,7 +57,7 @@ async function api(path, options = {}) {
 
 async function loadProducts(){
   try{
-    const data = await api('/Articulos?activo=eq.true&order=ArticuloId.asc');
+    const data = await api('/Articulos?Activo=eq.true&order=ArticuloId.asc');
     state.products = data.map(p => ({
       ...p,
       articuloId: p.ArticuloId,
@@ -77,7 +77,7 @@ async function loadProducts(){
 async function loadOrders(){
   try{
     const query = (state.user.rol === 'Administrador' || state.user.rol === 'Empleado')
-      ? '/Pedidos?select=*,Usuarios!Pedidos_ClienteId_fkey(Nombre,Telefono)&order=PedidoId.desc'
+      ? '/Pedidos?select=*,Usuarios!FK_Pedidos_Cliente(Nombre,Telefono)&order=PedidoId.desc'
       : `/Pedidos?ClienteId=eq.${state.user.usuarioId}&order=PedidoId.desc`;
     const data = await api(query);
     state.orders = data.map(o => ({
@@ -97,8 +97,8 @@ async function handleLogin(){
   const correo = document.querySelector('#loginEmail').value.trim();
   const pass = document.querySelector('#loginPass').value;
   try {
-    const users = await api(`/Usuarios?Correo=eq.${encodeURIComponent(correo)}`);
-    if (!users || users.length === 0) return alert('Correo no registrado.');
+    const users = await api(`/Usuarios?Correo=eq.${encodeURIComponent(correo)}&ContrasenaHash=eq.${encodeURIComponent(pass)}`);
+    if (!users || users.length === 0) return alert('Correo o contraseña incorrectos.');
     const u = users[0];
     state.user = {
       usuarioId: u.UsuarioId,
@@ -132,7 +132,7 @@ async function handleRegister(){
     await loadOrders();
     go('inicio');
   } catch (e) {
-    alert('Error al registrar cuenta: ' + e.message);
+    alert('Error al registrar cuenta (verifica si el correo ya existe): ' + e.message);
   }
 }
 
@@ -184,7 +184,6 @@ async function updateOrderStatus(PedidoId, NuevoEstado){
       method: 'PATCH',
       body: JSON.stringify({ Estado: NuevoEstado, EmpleadoId: state.user.usuarioId })
     });
-    // Registrar en HistorialEstadosPedido
     await api('/HistorialEstadosPedido', {
       method: 'POST',
       body: JSON.stringify({ PedidoId, Estado: NuevoEstado, UsuarioId: state.user.usuarioId })
@@ -249,7 +248,6 @@ async function createOrder(){
   const codigoRecogida = 'SM-' + Math.floor(1000 + Math.random() * 9000);
 
   try {
-    // 1. Crear Pedido en tabla Pedidos
     const createdOrder = await api('/Pedidos', {
       method: 'POST',
       headers: { 'Prefer': 'return=representation' },
@@ -263,7 +261,6 @@ async function createOrder(){
     });
     const order = createdOrder[0];
 
-    // 2. Registrar Detalle, Historial y actualizar Stock
     const detalles = [];
     for (const [articuloId, cantidad] of state.cart) {
       const prod = state.products.find(x => x.articuloId === articuloId);
