@@ -1,0 +1,18 @@
+CARPETA DE IMAGENES - SUPERMARKET
+
+Coloque aquí las imágenes con estos nombres:
+- banner-principal.jpg
+- leche-entera.jpg
+- pan-molde.jpg
+- huevos.jpg
+- manzanas.jpg
+- pollo-entero.jpg
+- arroz.jpg
+- pasta.jpg
+- agua.jpg
+
+Para artículos nuevos puede usar: articulo-{ArticuloId}.jpg
+Ejemplo: articulo-25.jpg
+
+Recomendación: JPG o WEBP, relación 4:3, mínimo 800 x 600 px.
+La API también puede devolver la propiedad imagenUrl con una ruta como imagenes/articulo-25.jpg.
